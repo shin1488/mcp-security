@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.springaicommunity.mcp.security.client.sync.oauth2.http.client;
+package org.springaicommunity.mcp.security.sample.tokenexchange;
 
 import java.net.URI;
 import java.net.http.HttpRequest;

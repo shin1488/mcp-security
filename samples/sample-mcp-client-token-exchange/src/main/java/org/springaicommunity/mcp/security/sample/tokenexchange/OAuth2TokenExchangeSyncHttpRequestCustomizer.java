@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.springaicommunity.mcp.security.client.sync.oauth2.http.client;
+package org.springaicommunity.mcp.security.sample.tokenexchange;
 
 import java.net.URI;
 import java.net.http.HttpRequest;
@@ -27,11 +27,17 @@ import org.springaicommunity.mcp.security.client.sync.AuthenticationMcpTransport
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.client.AuthorizedClientServiceOAuth2AuthorizedClientManager;
+import org.springframework.security.oauth2.client.OAuth2AuthorizationContext;
 import org.springframework.security.oauth2.client.OAuth2AuthorizeRequest;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.client.TokenExchangeOAuth2AuthorizedClientProvider;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
+import org.springframework.security.oauth2.core.OAuth2Token;
+import org.springframework.security.oauth2.jwt.Jwt;
 
 /**
  * Adds an OAuth2 access token to outgoing MCP client HTTP requests using the
@@ -51,14 +57,14 @@ import org.springframework.security.oauth2.core.OAuth2AccessToken;
  * preserving the user's identity.
  * <p>
  * The {@link OAuth2AuthorizedClientManager} must be configured with a
- * {@link TokenExchangeOAuth2AuthorizedClientProvider}. Subject token resolution, such as
- * the {@code subject_token_type} sent to the authorization server, is configured on that
- * provider, not on this customizer.
+ * {@link TokenExchangeOAuth2AuthorizedClientProvider}. Use
+ * {@link #tokenExchangeAuthorizedClientManager(ClientRegistrationRepository, OAuth2AuthorizedClientService)}
+ * for a manager pre-configured with a subject token resolver that works against both
+ * Keycloak and Spring Authorization Server.
  * <p>
  * When no user {@link Authentication} is present in the transport context (for example
  * for requests sent on application startup or from background threads), no
- * {@code Authorization} header is added, in line with
- * {@link OAuth2AuthorizationCodeSyncHttpRequestCustomizer}. Use
+ * {@code Authorization} header is added. Use
  * {@link #failOnMissingAuthentication(boolean)} to throw instead, for multi-tenant setups
  * where user-scoped requests must never be sent without the user's identity.
  * <p>
@@ -67,7 +73,6 @@ import org.springframework.security.oauth2.core.OAuth2AccessToken;
  *
  * @author Yeongchan Shin
  * @see TokenExchangeOAuth2AuthorizedClientProvider
- * @see OAuth2ClientCredentialsSyncHttpRequestCustomizer
  */
 public class OAuth2TokenExchangeSyncHttpRequestCustomizer implements McpSyncHttpClientRequestCustomizer {
 
@@ -122,6 +127,40 @@ public class OAuth2TokenExchangeSyncHttpRequestCustomizer implements McpSyncHttp
 	 */
 	public void failOnMissingAuthentication(boolean failOnMissingAuthentication) {
 		this.failOnMissingAuthentication = failOnMissingAuthentication;
+	}
+
+	/**
+	 * Creates an {@link OAuth2AuthorizedClientManager} configured for token exchange,
+	 * with a subject token resolver that always sends the subject token as
+	 * {@code urn:ietf:params:oauth:token-type:access_token}. Spring Security's default
+	 * resolver sends {@link Jwt} principals as {@code ...:jwt}, which Keycloak's standard
+	 * token exchange rejects; the {@code ...:access_token} type is accepted by both
+	 * Keycloak and Spring Authorization Server.
+	 * @param clientRegistrationRepository the client registration repository
+	 * @param authorizedClientService the authorized client service
+	 * @return an authorized client manager supporting the token exchange grant
+	 */
+	public static OAuth2AuthorizedClientManager tokenExchangeAuthorizedClientManager(
+			ClientRegistrationRepository clientRegistrationRepository,
+			OAuth2AuthorizedClientService authorizedClientService) {
+		var provider = new TokenExchangeOAuth2AuthorizedClientProvider();
+		provider.setSubjectTokenResolver(OAuth2TokenExchangeSyncHttpRequestCustomizer::resolveSubjectToken);
+		var manager = new AuthorizedClientServiceOAuth2AuthorizedClientManager(clientRegistrationRepository,
+				authorizedClientService);
+		manager.setAuthorizedClientProvider(provider);
+		return manager;
+	}
+
+	private static OAuth2Token resolveSubjectToken(OAuth2AuthorizationContext context) {
+		if (context.getPrincipal().getPrincipal() instanceof Jwt jwt) {
+			return new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER, jwt.getTokenValue(), jwt.getIssuedAt(),
+					jwt.getExpiresAt());
+		}
+		if (context.getPrincipal().getPrincipal() instanceof OAuth2Token token) {
+			return token;
+		}
+		throw new IllegalStateException(
+				"Token exchange requires the principal to carry the subject token, either as a Jwt or an OAuth2Token");
 	}
 
 }
