@@ -137,14 +137,17 @@ public class OAuth2TokenExchangeSyncHttpRequestCustomizer implements McpSyncHttp
 	 * <p>
 	 * That is the type <a href="https://www.rfc-editor.org/rfc/rfc8693#section-3">RFC
 	 * 8693 section 3</a> defines for an access token issued by the authorization server
-	 * being called, which is what a resource-server host holds; the {@code ...:jwt} type
-	 * is defined for sending a JWT as an authorization grant to a <em>different</em>
+	 * being called, which is what the host holds in this topology; the {@code ...:jwt}
+	 * type is defined for sending a JWT as an authorization grant to a <em>different</em>
 	 * authorization server (RFC 7523).
 	 * <p>
-	 * Spring Security's default resolver derives {@code subject_token_type} from the Java
-	 * type of the subject token, so a {@link Jwt} principal is sent as {@code ...:jwt}.
-	 * Spring Authorization Server accepts both types, while Keycloak's standard token
-	 * exchange accepts access tokens only, so the type is set explicitly here.
+	 * Spring Security derives {@code subject_token_type} from the Java type of the
+	 * subject token: {@code TokenExchangeGrantRequest} maps a {@link Jwt} to
+	 * {@code ...:jwt} and any other {@code OAuth2Token} to {@code ...:access_token}. A
+	 * resource server holds a {@link Jwt}, so the request would go out as
+	 * {@code ...:jwt}. Spring Authorization Server accepts both types, while Keycloak's
+	 * standard token exchange accepts access tokens only, so the type is set explicitly
+	 * here.
 	 * @param clientRegistrationRepository the client registration repository
 	 * @param authorizedClientService the authorized client service
 	 * @return an authorized client manager supporting the token exchange grant
@@ -152,17 +155,28 @@ public class OAuth2TokenExchangeSyncHttpRequestCustomizer implements McpSyncHttp
 	public static OAuth2AuthorizedClientManager tokenExchangeAuthorizedClientManager(
 			ClientRegistrationRepository clientRegistrationRepository,
 			OAuth2AuthorizedClientService authorizedClientService) {
-		var accessTokenResponseClient = new RestClientTokenExchangeTokenResponseClient();
-		accessTokenResponseClient.setParametersCustomizer(
-				(parameters) -> parameters.set(OAuth2ParameterNames.SUBJECT_TOKEN_TYPE, ACCESS_TOKEN_TYPE_VALUE));
-
 		var provider = new TokenExchangeOAuth2AuthorizedClientProvider();
-		provider.setAccessTokenResponseClient(accessTokenResponseClient);
+		provider.setAccessTokenResponseClient(accessTokenResponseClient());
 
 		var manager = new AuthorizedClientServiceOAuth2AuthorizedClientManager(clientRegistrationRepository,
 				authorizedClientService);
 		manager.setAuthorizedClientProvider(provider);
 		return manager;
+	}
+
+	/**
+	 * The token response client used by
+	 * {@link #tokenExchangeAuthorizedClientManager(ClientRegistrationRepository, OAuth2AuthorizedClientService)}.
+	 * It sets {@code subject_token_type} to
+	 * {@code urn:ietf:params:oauth:token-type:access_token} on every token request,
+	 * regardless of the Java type of the subject token.
+	 * @return the token response client for the token exchange grant
+	 */
+	static RestClientTokenExchangeTokenResponseClient accessTokenResponseClient() {
+		var accessTokenResponseClient = new RestClientTokenExchangeTokenResponseClient();
+		accessTokenResponseClient.setParametersCustomizer(
+				(parameters) -> parameters.set(OAuth2ParameterNames.SUBJECT_TOKEN_TYPE, ACCESS_TOKEN_TYPE_VALUE));
+		return accessTokenResponseClient;
 	}
 
 }

@@ -31,14 +31,25 @@ import org.mockito.ArgumentCaptor;
 import org.springaicommunity.mcp.security.client.sync.AuthenticationMcpTransportContextProvider;
 
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.converter.FormHttpMessageConverter;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.OAuth2AuthorizeRequest;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
+import org.springframework.security.oauth2.client.endpoint.TokenExchangeGrantRequest;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
+import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
+import org.springframework.security.oauth2.core.http.converter.OAuth2AccessTokenResponseHttpMessageConverter;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.client.match.MockRestRequestMatchers;
+import org.springframework.test.web.client.response.MockRestResponseCreators;
+import org.springframework.web.client.RestClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -59,6 +70,8 @@ class OAuth2TokenExchangeSyncHttpRequestCustomizerTests {
 	private static final String REGISTRATION_ID = "test-registration";
 
 	private static final String TOKEN_VALUE = "test-access-token";
+
+	private static final String TOKEN_URI = "https://auth.example.com/token";
 
 	private static final URI ENDPOINT = URI.create("https://mcp.example.com");
 
@@ -170,6 +183,51 @@ class OAuth2TokenExchangeSyncHttpRequestCustomizerTests {
 
 	}
 
+	@Nested
+	@DisplayName("Subject token type")
+	class SubjectTokenType {
+
+		private static final String SUBJECT_TOKEN_VALUE = "incoming-user-jwt";
+
+		private static final String ACCESS_TOKEN_TYPE_VALUE = "urn:ietf:params:oauth:token-type:access_token";
+
+		@Test
+		@DisplayName("sends subject_token_type=...:access_token even though the subject token is a Jwt")
+		void sendsAccessTokenSubjectTokenType() {
+			var restClientBuilder = RestClient.builder().configureMessageConverters((messageConverters) -> {
+				messageConverters.addCustomConverter(new FormHttpMessageConverter());
+				messageConverters.addCustomConverter(new OAuth2AccessTokenResponseHttpMessageConverter());
+			});
+			var mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
+
+			var accessTokenResponseClient = OAuth2TokenExchangeSyncHttpRequestCustomizer.accessTokenResponseClient();
+			accessTokenResponseClient.setRestClient(restClientBuilder.build());
+
+			mockServer.expect(MockRestRequestMatchers.requestTo(TOKEN_URI))
+				.andExpect(MockRestRequestMatchers.method(HttpMethod.POST))
+				.andExpect(MockRestRequestMatchers.content()
+					.formDataContains(Map.of(OAuth2ParameterNames.GRANT_TYPE,
+							AuthorizationGrantType.TOKEN_EXCHANGE.getValue(), OAuth2ParameterNames.SUBJECT_TOKEN,
+							SUBJECT_TOKEN_VALUE, OAuth2ParameterNames.SUBJECT_TOKEN_TYPE, ACCESS_TOKEN_TYPE_VALUE)))
+				.andRespond(MockRestResponseCreators.withSuccess("""
+						{"access_token":"exchanged-token","token_type":"Bearer","expires_in":300}
+						""", MediaType.APPLICATION_JSON));
+
+			// Spring Security's default mapping would send this Jwt as ...:jwt
+			var subjectToken = Jwt.withTokenValue(SUBJECT_TOKEN_VALUE)
+				.header("alg", "none")
+				.claim("sub", "test-user")
+				.build();
+
+			var tokenResponse = accessTokenResponseClient
+				.getTokenResponse(new TokenExchangeGrantRequest(clientRegistration(), subjectToken, null));
+
+			assertThat(tokenResponse.getAccessToken().getTokenValue()).isEqualTo("exchanged-token");
+			mockServer.verify();
+		}
+
+	}
+
 	private static McpTransportContext contextWithAuthentication() {
 		return McpTransportContext
 			.create(Map.of(AuthenticationMcpTransportContextProvider.AUTHENTICATION_KEY, AUTHENTICATION));
@@ -179,7 +237,8 @@ class OAuth2TokenExchangeSyncHttpRequestCustomizerTests {
 		return ClientRegistration.withRegistrationId(REGISTRATION_ID)
 			.authorizationGrantType(AuthorizationGrantType.TOKEN_EXCHANGE)
 			.clientId("test-client-id")
-			.tokenUri("https://auth.example.com/token")
+			.clientSecret("test-client-secret")
+			.tokenUri(TOKEN_URI)
 			.build();
 	}
 

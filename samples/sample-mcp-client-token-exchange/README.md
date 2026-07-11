@@ -159,11 +159,13 @@ var provider = new TokenExchangeOAuth2AuthorizedClientProvider();
 provider.setAccessTokenResponseClient(accessTokenResponseClient);
 ```
 
-Spring Security's default resolver derives `subject_token_type` from the Java type of the
-subject token, so a `Jwt` principal — which is what a resource server holds — goes out as
-`...:jwt`. Spring Authorization Server accepts both types, so this only surfaces against
-authorization servers that follow the distinction more strictly: Keycloak's standard token
-exchange accepts access tokens only (see the
+Without that, Spring Security derives `subject_token_type` from the Java type of the
+subject token: `TokenExchangeGrantRequest` maps a `Jwt` to `...:jwt` and any other
+`OAuth2Token` to `...:access_token`. The subject token resolver only chooses which token
+to send — the type identifier comes from that mapping. A resource server holds a `Jwt`, so
+the request would go out as `...:jwt`. Spring Authorization Server accepts both types, so
+this only surfaces against authorization servers that follow the distinction more strictly:
+Keycloak's standard token exchange accepts access tokens only (see the
 [Keycloak token exchange guide](https://www.keycloak.org/securing-apps/token-exchange)).
 Setting the type explicitly keeps the sample portable across both.
 
@@ -178,9 +180,15 @@ To run this against Keycloak instead of Spring Authorization Server:
   subject token**. If user tokens are issued to a gateway or frontend client, add an
   audience mapper on those clients that includes the exchanging client's id.
 
-## End-to-end test
+## Tests
 
 `StreamableHttpTokenExchangeTests` in [integration-tests](../integration-tests)
 verifies the complete flow: a user token obtained through the `authorization_code` flow
 by one client is exchanged by a different client, and the exchanged token is used to
 call a tool on a secured MCP server, which responds with the original user's identity.
+
+That test runs against Spring Authorization Server, which accepts both `...:access_token`
+and `...:jwt`, so it cannot catch a regression in the subject token type. The unit test
+`OAuth2TokenExchangeSyncHttpRequestCustomizerTests.SubjectTokenType` asserts the token
+request on the wire instead: given a `Jwt` subject token, the form body must carry
+`subject_token_type=urn:ietf:params:oauth:token-type:access_token`.
