@@ -28,15 +28,15 @@ import org.springaicommunity.mcp.security.client.sync.AuthenticationMcpTransport
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.AuthorizedClientServiceOAuth2AuthorizedClientManager;
-import org.springframework.security.oauth2.client.OAuth2AuthorizationContext;
 import org.springframework.security.oauth2.client.OAuth2AuthorizeRequest;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.client.TokenExchangeOAuth2AuthorizedClientProvider;
+import org.springframework.security.oauth2.client.endpoint.RestClientTokenExchangeTokenResponseClient;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
-import org.springframework.security.oauth2.core.OAuth2Token;
+import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 /**
@@ -59,8 +59,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
  * The {@link OAuth2AuthorizedClientManager} must be configured with a
  * {@link TokenExchangeOAuth2AuthorizedClientProvider}. Use
  * {@link #tokenExchangeAuthorizedClientManager(ClientRegistrationRepository, OAuth2AuthorizedClientService)}
- * for a manager pre-configured with a subject token resolver that works against both
- * Keycloak and Spring Authorization Server.
+ * for a manager that sends a {@code subject_token_type} accepted by both Keycloak and
+ * Spring Authorization Server.
  * <p>
  * When no user {@link Authentication} is present in the transport context (for example
  * for requests sent on application startup or from background threads), no
@@ -77,6 +77,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 public class OAuth2TokenExchangeSyncHttpRequestCustomizer implements McpSyncHttpClientRequestCustomizer {
 
 	private static final Logger log = LoggerFactory.getLogger(OAuth2TokenExchangeSyncHttpRequestCustomizer.class);
+
+	private static final String ACCESS_TOKEN_TYPE_VALUE = "urn:ietf:params:oauth:token-type:access_token";
 
 	private final OAuth2AuthorizedClientManager authorizedClientManager;
 
@@ -131,11 +133,18 @@ public class OAuth2TokenExchangeSyncHttpRequestCustomizer implements McpSyncHttp
 
 	/**
 	 * Creates an {@link OAuth2AuthorizedClientManager} configured for token exchange,
-	 * with a subject token resolver that always sends the subject token as
-	 * {@code urn:ietf:params:oauth:token-type:access_token}. Spring Security's default
-	 * resolver sends {@link Jwt} principals as {@code ...:jwt}, which Keycloak's standard
-	 * token exchange rejects; the {@code ...:access_token} type is accepted by both
-	 * Keycloak and Spring Authorization Server.
+	 * sending the subject token as {@code urn:ietf:params:oauth:token-type:access_token}.
+	 * <p>
+	 * That is the type <a href="https://www.rfc-editor.org/rfc/rfc8693#section-3">RFC
+	 * 8693 section 3</a> defines for an access token issued by the authorization server
+	 * being called, which is what a resource-server host holds; the {@code ...:jwt} type
+	 * is defined for sending a JWT as an authorization grant to a <em>different</em>
+	 * authorization server (RFC 7523).
+	 * <p>
+	 * Spring Security's default resolver derives {@code subject_token_type} from the Java
+	 * type of the subject token, so a {@link Jwt} principal is sent as {@code ...:jwt}.
+	 * Spring Authorization Server accepts both types, while Keycloak's standard token
+	 * exchange accepts access tokens only, so the type is set explicitly here.
 	 * @param clientRegistrationRepository the client registration repository
 	 * @param authorizedClientService the authorized client service
 	 * @return an authorized client manager supporting the token exchange grant
@@ -143,24 +152,17 @@ public class OAuth2TokenExchangeSyncHttpRequestCustomizer implements McpSyncHttp
 	public static OAuth2AuthorizedClientManager tokenExchangeAuthorizedClientManager(
 			ClientRegistrationRepository clientRegistrationRepository,
 			OAuth2AuthorizedClientService authorizedClientService) {
+		var accessTokenResponseClient = new RestClientTokenExchangeTokenResponseClient();
+		accessTokenResponseClient.setParametersCustomizer(
+				(parameters) -> parameters.set(OAuth2ParameterNames.SUBJECT_TOKEN_TYPE, ACCESS_TOKEN_TYPE_VALUE));
+
 		var provider = new TokenExchangeOAuth2AuthorizedClientProvider();
-		provider.setSubjectTokenResolver(OAuth2TokenExchangeSyncHttpRequestCustomizer::resolveSubjectToken);
+		provider.setAccessTokenResponseClient(accessTokenResponseClient);
+
 		var manager = new AuthorizedClientServiceOAuth2AuthorizedClientManager(clientRegistrationRepository,
 				authorizedClientService);
 		manager.setAuthorizedClientProvider(provider);
 		return manager;
-	}
-
-	private static OAuth2Token resolveSubjectToken(OAuth2AuthorizationContext context) {
-		if (context.getPrincipal().getPrincipal() instanceof Jwt jwt) {
-			return new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER, jwt.getTokenValue(), jwt.getIssuedAt(),
-					jwt.getExpiresAt());
-		}
-		if (context.getPrincipal().getPrincipal() instanceof OAuth2Token token) {
-			return token;
-		}
-		throw new IllegalStateException(
-				"Token exchange requires the principal to carry the subject token, either as a Jwt or an OAuth2Token");
 	}
 
 }

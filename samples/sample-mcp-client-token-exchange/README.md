@@ -138,13 +138,34 @@ integration test exercises.
 
 ## Subject token type
 
-`tokenExchangeAuthorizedClientManager(...)` configures a subject token resolver that
-always sends the subject token as `urn:ietf:params:oauth:token-type:access_token`.
-Spring Security's default resolver sends `Jwt` principals as `...:jwt`, which works
-against Spring Authorization Server but is rejected by Keycloak's standard token
-exchange ("Access token type only", see the
+The host is a resource server acting as the client of a token exchange — the role
+[RFC 8693 section 1](https://www.rfc-editor.org/rfc/rfc8693#section-1) describes, and the
+scenario its first example walks through. The subject token it holds is an access token
+issued by the same authorization server it is calling, which is what
+[section 3](https://www.rfc-editor.org/rfc/rfc8693#section-3) defines
+`urn:ietf:params:oauth:token-type:access_token` for. The `...:jwt` type is defined for
+sending a JWT as an authorization grant to a *different* authorization server (RFC 7523),
+which is not what happens here.
+
+`tokenExchangeAuthorizedClientManager(...)` therefore sets `subject_token_type`
+explicitly on the token response client:
+
+```java
+var accessTokenResponseClient = new RestClientTokenExchangeTokenResponseClient();
+accessTokenResponseClient.setParametersCustomizer((parameters) -> parameters
+    .set(OAuth2ParameterNames.SUBJECT_TOKEN_TYPE, "urn:ietf:params:oauth:token-type:access_token"));
+
+var provider = new TokenExchangeOAuth2AuthorizedClientProvider();
+provider.setAccessTokenResponseClient(accessTokenResponseClient);
+```
+
+Spring Security's default resolver derives `subject_token_type` from the Java type of the
+subject token, so a `Jwt` principal — which is what a resource server holds — goes out as
+`...:jwt`. Spring Authorization Server accepts both types, so this only surfaces against
+authorization servers that follow the distinction more strictly: Keycloak's standard token
+exchange accepts access tokens only (see the
 [Keycloak token exchange guide](https://www.keycloak.org/securing-apps/token-exchange)).
-The `...:access_token` type is accepted by both, keeping the setup portable.
+Setting the type explicitly keeps the sample portable across both.
 
 ## Keycloak notes
 
