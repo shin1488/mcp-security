@@ -75,6 +75,8 @@ class OAuth2TokenExchangeSyncHttpRequestCustomizerTests {
 
 	private static final URI ENDPOINT = URI.create("https://mcp.example.com");
 
+	private static final String RESOURCE = "https://mcp.example.com";
+
 	private static final Authentication AUTHENTICATION = new TestingAuthenticationToken("user", "password");
 
 	private final OAuth2AuthorizedClientManager authorizedClientManager = mock(OAuth2AuthorizedClientManager.class);
@@ -184,23 +186,24 @@ class OAuth2TokenExchangeSyncHttpRequestCustomizerTests {
 	}
 
 	@Nested
-	@DisplayName("Subject token type")
-	class SubjectTokenType {
+	@DisplayName("Token request parameters")
+	class TokenRequestParameters {
 
 		private static final String SUBJECT_TOKEN_VALUE = "incoming-user-jwt";
 
 		private static final String ACCESS_TOKEN_TYPE_VALUE = "urn:ietf:params:oauth:token-type:access_token";
 
 		@Test
-		@DisplayName("sends subject_token_type=...:access_token even though the subject token is a Jwt")
-		void sendsAccessTokenSubjectTokenType() {
+		@DisplayName("sends subject_token_type=...:access_token even though the subject token is a Jwt, and resource=<MCP server>")
+		void sendsAccessTokenSubjectTokenTypeAndResource() {
 			var restClientBuilder = RestClient.builder().configureMessageConverters((messageConverters) -> {
 				messageConverters.addCustomConverter(new FormHttpMessageConverter());
 				messageConverters.addCustomConverter(new OAuth2AccessTokenResponseHttpMessageConverter());
 			});
 			var mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
 
-			var accessTokenResponseClient = OAuth2TokenExchangeSyncHttpRequestCustomizer.accessTokenResponseClient();
+			var accessTokenResponseClient = OAuth2TokenExchangeSyncHttpRequestCustomizer
+				.accessTokenResponseClient(RESOURCE);
 			accessTokenResponseClient.setRestClient(restClientBuilder.build());
 
 			mockServer.expect(MockRestRequestMatchers.requestTo(TOKEN_URI))
@@ -208,7 +211,8 @@ class OAuth2TokenExchangeSyncHttpRequestCustomizerTests {
 				.andExpect(MockRestRequestMatchers.content()
 					.formDataContains(Map.of(OAuth2ParameterNames.GRANT_TYPE,
 							AuthorizationGrantType.TOKEN_EXCHANGE.getValue(), OAuth2ParameterNames.SUBJECT_TOKEN,
-							SUBJECT_TOKEN_VALUE, OAuth2ParameterNames.SUBJECT_TOKEN_TYPE, ACCESS_TOKEN_TYPE_VALUE)))
+							SUBJECT_TOKEN_VALUE, OAuth2ParameterNames.SUBJECT_TOKEN_TYPE, ACCESS_TOKEN_TYPE_VALUE,
+							OAuth2ParameterNames.RESOURCE, RESOURCE)))
 				.andRespond(MockRestResponseCreators.withSuccess("""
 						{"access_token":"exchanged-token","token_type":"Bearer","expires_in":300}
 						""", MediaType.APPLICATION_JSON));
@@ -224,6 +228,14 @@ class OAuth2TokenExchangeSyncHttpRequestCustomizerTests {
 
 			assertThat(tokenResponse.getAccessToken().getTokenValue()).isEqualTo("exchanged-token");
 			mockServer.verify();
+		}
+
+		@Test
+		@DisplayName("requires a resource: MCP clients must send it regardless of authorization server support")
+		void requiresResource() {
+			assertThatIllegalArgumentException()
+				.isThrownBy(() -> OAuth2TokenExchangeSyncHttpRequestCustomizer.accessTokenResponseClient(""))
+				.withMessageContaining("resource");
 		}
 
 	}

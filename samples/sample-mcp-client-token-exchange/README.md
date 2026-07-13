@@ -59,6 +59,7 @@ Authorization: Basic <token-exchange client credentials>
 grant_type=urn:ietf:params:oauth:grant-type:token-exchange
 subject_token=<the incoming user access token>
 subject_token_type=urn:ietf:params:oauth:token-type:access_token
+resource=<the canonical URI of the MCP server>
 ```
 
 The response contains a new access token. As observed in the integration test:
@@ -73,13 +74,64 @@ Token exchange preserves the user's identity but mints a fresh token: the exchan
 token is a new authorization decision made by the authorization server, not a forwarded
 credential.
 
-With Spring Authorization Server, `aud` reflects the client the token was issued to,
-and the MCP server in this sample accepts the token based on the shared issuer
-(`validateAudienceClaim` defaults to `false`, since not every authorization server can
-issue audience-bound tokens). To bind exchanged tokens to the MCP server's own
-identifier, use [resource indicators (RFC 8707)](https://www.rfc-editor.org/rfc/rfc8707),
-or audience mappers on Keycloak — and once tokens are audience-bound, enable
-`validateAudienceClaim(true)` on the MCP server in production.
+## The resource parameter
+
+The [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization#resource-parameter-implementation)
+requires MCP clients to implement [RFC 8707 resource indicators](https://www.rfc-editor.org/rfc/rfc8707):
+the `resource` parameter MUST be included in token requests, MUST identify the MCP server
+the token is intended for, and MUST be sent **regardless of whether the authorization
+server supports it**. `tokenExchangeAuthorizedClientManager(...)` therefore takes the MCP
+server's canonical URI and sets it on every exchange.
+
+Sending it is the client's part. Acting on it is not:
+
+| Layer | Requirement | In this sample |
+|---|---|---|
+| MCP client | send `resource` naming the MCP server | done, asserted on the wire |
+| Authorization server | reflect `resource` into the token's `aud` | Spring Authorization Server issues `aud` as the client the token was issued to and does not reflect `resource` into it; Keycloak can bind it with an audience mapper |
+| MCP server | validate `aud` | `validateAudienceClaim` defaults to `false`, so the token is accepted on the shared issuer |
+
+So the exchanged token here is not audience-bound to the MCP server, which is why the
+integration test observes `aud: token-exchange-client`. To bind it, configure the
+authorization server to honour resource indicators (or add an audience mapper on Keycloak),
+and then enable `validateAudienceClaim(true)` on the MCP server in production.
+
+### One registration per MCP server, per grant type
+
+`AuthorizedClientServiceOAuth2AuthorizedClientManager` loads and saves authorized clients
+through the `OAuth2AuthorizedClientService`, which keys them by
+`(clientRegistrationId, principalName)`. The `resource` is **not** part of that key.
+
+A `ClientRegistration` therefore corresponds to exactly one MCP server. Sharing one
+registration across several MCP servers would serve a token obtained for one server out of
+the store when calling another — the token misuse that audience binding exists to prevent.
+This is the model the library already assumes: `McpClientRegistrationRepository` resolves the
+`resource` of a token request from the registration id. That mapping is only populated by
+dynamic client registration, though — registrations declared under
+`spring.security.oauth2.client.registration`, as a resource-server host does, are stored with
+a `null` resource identifier — so this sample passes the `resource` to the manager instead.
+
+The same applies to the `client_credentials` registration used for protocol requests. With
+several MCP servers, register one client per server, per grant type:
+
+```properties
+# tools/call, as the user
+spring.security.oauth2.client.registration.mcp-tx-orders.client-id=<client-id>
+spring.security.oauth2.client.registration.mcp-tx-orders.authorization-grant-type=urn:ietf:params:oauth:grant-type:token-exchange
+spring.security.oauth2.client.registration.mcp-tx-orders.provider=<your-provider>
+
+# protocol requests, as the host itself
+spring.security.oauth2.client.registration.mcp-orders.client-id=<client-id>
+spring.security.oauth2.client.registration.mcp-orders.authorization-grant-type=client_credentials
+spring.security.oauth2.client.registration.mcp-orders.provider=<your-provider>
+```
+
+and build one manager per token-exchange registration, each with that server's canonical URI
+as its `resource`.
+
+Note that the library sends `resource` on `authorization_code` token requests only
+(`McpClientOAuth2Configurer`), so tokens obtained through `client_credentials` are not yet
+requested for a specific MCP server.
 
 ## Usage
 
@@ -108,9 +160,11 @@ class McpClientSecurityConfiguration {
     @Bean
     McpSyncHttpClientRequestCustomizer requestCustomizer(
             ClientRegistrationRepository clientRegistrationRepository,
-            OAuth2AuthorizedClientService authorizedClientService) {
+            OAuth2AuthorizedClientService authorizedClientService,
+            @Value("${mcp.server.url}") String mcpServerUri) {
         var manager = OAuth2TokenExchangeSyncHttpRequestCustomizer
-            .tokenExchangeAuthorizedClientManager(clientRegistrationRepository, authorizedClientService);
+            .tokenExchangeAuthorizedClientManager(clientRegistrationRepository, authorizedClientService,
+                mcpServerUri);
         return new OAuth2TokenExchangeSyncHttpRequestCustomizer(manager, "token-exchange");
     }
 

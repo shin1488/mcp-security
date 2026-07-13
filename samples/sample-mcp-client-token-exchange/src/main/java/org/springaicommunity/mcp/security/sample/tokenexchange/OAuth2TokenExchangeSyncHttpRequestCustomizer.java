@@ -38,6 +38,7 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.util.Assert;
 
 /**
  * Adds an OAuth2 access token to outgoing MCP client HTTP requests using the
@@ -53,14 +54,16 @@ import org.springframework.security.oauth2.jwt.Jwt;
  * The user {@link Authentication} is read from the {@link McpTransportContext} (see
  * {@link AuthenticationMcpTransportContextProvider}) and used as the principal of the
  * {@link OAuth2AuthorizeRequest}, so the user's token is sent as the
- * {@code subject_token} and exchanged for a token whose audience is the MCP server,
- * preserving the user's identity.
+ * {@code subject_token} and exchanged for a newly issued token that preserves the user's
+ * identity ({@code sub}) while being requested for the MCP server, which is named by the
+ * {@code resource} parameter of the exchange.
  * <p>
  * The {@link OAuth2AuthorizedClientManager} must be configured with a
  * {@link TokenExchangeOAuth2AuthorizedClientProvider}. Use
- * {@link #tokenExchangeAuthorizedClientManager(ClientRegistrationRepository, OAuth2AuthorizedClientService)}
+ * {@link #tokenExchangeAuthorizedClientManager(ClientRegistrationRepository, OAuth2AuthorizedClientService, String)}
  * for a manager that sends a {@code subject_token_type} accepted by both Keycloak and
- * Spring Authorization Server.
+ * Spring Authorization Server, and the {@code resource} parameter required of MCP
+ * clients.
  * <p>
  * When no user {@link Authentication} is present in the transport context (for example
  * for requests sent on application startup or from background threads), no
@@ -133,30 +136,57 @@ public class OAuth2TokenExchangeSyncHttpRequestCustomizer implements McpSyncHttp
 
 	/**
 	 * Creates an {@link OAuth2AuthorizedClientManager} configured for token exchange,
-	 * sending the subject token as {@code urn:ietf:params:oauth:token-type:access_token}.
+	 * sending the subject token as {@code urn:ietf:params:oauth:token-type:access_token}
+	 * and naming the MCP server in the {@code resource} parameter.
 	 * <p>
-	 * That is the type <a href="https://www.rfc-editor.org/rfc/rfc8693#section-3">RFC
-	 * 8693 section 3</a> defines for an access token issued by the authorization server
-	 * being called, which is what the host holds in this topology; the {@code ...:jwt}
-	 * type is defined for sending a JWT as an authorization grant to a <em>different</em>
-	 * authorization server (RFC 7523).
-	 * <p>
-	 * Spring Security derives {@code subject_token_type} from the Java type of the
-	 * subject token: {@code TokenExchangeGrantRequest} maps a {@link Jwt} to
+	 * <strong>subject_token_type.</strong> {@code ...:access_token} is the type
+	 * <a href="https://www.rfc-editor.org/rfc/rfc8693#section-3">RFC 8693 section 3</a>
+	 * defines for an access token issued by the authorization server being called, which
+	 * is what the host holds in this topology; the {@code ...:jwt} type is defined for
+	 * sending a JWT as an authorization grant to a <em>different</em> authorization
+	 * server (RFC 7523). Spring Security derives {@code subject_token_type} from the Java
+	 * type of the subject token: {@code TokenExchangeGrantRequest} maps a {@link Jwt} to
 	 * {@code ...:jwt} and any other {@code OAuth2Token} to {@code ...:access_token}. A
 	 * resource server holds a {@link Jwt}, so the request would go out as
 	 * {@code ...:jwt}. Spring Authorization Server accepts both types, while Keycloak's
 	 * standard token exchange accepts access tokens only, so the type is set explicitly
 	 * here.
+	 * <p>
+	 * <strong>resource.</strong> The <a href=
+	 * "https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization">MCP
+	 * authorization specification</a> requires MCP clients to implement
+	 * <a href="https://www.rfc-editor.org/rfc/rfc8707">RFC 8707 resource indicators</a>:
+	 * the {@code resource} parameter MUST be included in token requests, MUST identify
+	 * the MCP server the token is intended for, and MUST be sent regardless of whether
+	 * the authorization server supports it. Whether it ends up in the token's {@code aud}
+	 * claim is up to the authorization server: Spring Authorization Server issues
+	 * {@code aud} as the client the token was issued to, whereas Keycloak can bind the
+	 * audience with an audience mapper.
+	 * <p>
+	 * <strong>One registration per MCP server.</strong> This manager loads and saves
+	 * authorized clients through the {@link OAuth2AuthorizedClientService}, which keys
+	 * them by {@code (clientRegistrationId, principalName)} — the {@code resource} is not
+	 * part of that key. A registration therefore corresponds to exactly one MCP server,
+	 * and this manager to exactly one {@code resource}. Sharing a single registration
+	 * across several MCP servers would serve a token issued for one server from the store
+	 * when calling another, which is the token misuse audience binding exists to prevent.
+	 * <p>
+	 * The library keeps that same mapping in {@code McpClientRegistrationRepository},
+	 * which resolves the {@code resource} of a token request from the registration id.
+	 * That mapping is only populated by dynamic client registration: registrations
+	 * declared under {@code spring.security.oauth2.client.registration}, as a
+	 * resource-server host does, are stored with a {@code null} resource identifier. The
+	 * {@code resource} is therefore passed in here.
 	 * @param clientRegistrationRepository the client registration repository
 	 * @param authorizedClientService the authorized client service
+	 * @param resource the canonical URI of the MCP server this manager obtains tokens for
 	 * @return an authorized client manager supporting the token exchange grant
 	 */
 	public static OAuth2AuthorizedClientManager tokenExchangeAuthorizedClientManager(
 			ClientRegistrationRepository clientRegistrationRepository,
-			OAuth2AuthorizedClientService authorizedClientService) {
+			OAuth2AuthorizedClientService authorizedClientService, String resource) {
 		var provider = new TokenExchangeOAuth2AuthorizedClientProvider();
-		provider.setAccessTokenResponseClient(accessTokenResponseClient());
+		provider.setAccessTokenResponseClient(accessTokenResponseClient(resource));
 
 		var manager = new AuthorizedClientServiceOAuth2AuthorizedClientManager(clientRegistrationRepository,
 				authorizedClientService);
@@ -166,16 +196,21 @@ public class OAuth2TokenExchangeSyncHttpRequestCustomizer implements McpSyncHttp
 
 	/**
 	 * The token response client used by
-	 * {@link #tokenExchangeAuthorizedClientManager(ClientRegistrationRepository, OAuth2AuthorizedClientService)}.
+	 * {@link #tokenExchangeAuthorizedClientManager(ClientRegistrationRepository, OAuth2AuthorizedClientService, String)}.
 	 * It sets {@code subject_token_type} to
 	 * {@code urn:ietf:params:oauth:token-type:access_token} on every token request,
-	 * regardless of the Java type of the subject token.
+	 * regardless of the Java type of the subject token, and {@code resource} to the MCP
+	 * server the token is intended for.
+	 * @param resource the canonical URI of the MCP server
 	 * @return the token response client for the token exchange grant
 	 */
-	static RestClientTokenExchangeTokenResponseClient accessTokenResponseClient() {
+	static RestClientTokenExchangeTokenResponseClient accessTokenResponseClient(String resource) {
+		Assert.hasText(resource, "resource cannot be empty");
 		var accessTokenResponseClient = new RestClientTokenExchangeTokenResponseClient();
-		accessTokenResponseClient.setParametersCustomizer(
-				(parameters) -> parameters.set(OAuth2ParameterNames.SUBJECT_TOKEN_TYPE, ACCESS_TOKEN_TYPE_VALUE));
+		accessTokenResponseClient.setParametersCustomizer((parameters) -> {
+			parameters.set(OAuth2ParameterNames.SUBJECT_TOKEN_TYPE, ACCESS_TOKEN_TYPE_VALUE);
+			parameters.set(OAuth2ParameterNames.RESOURCE, resource);
+		});
 		return accessTokenResponseClient;
 	}
 

@@ -159,8 +159,12 @@ class StreamableHttpTokenExchangeTests {
 			.build();
 		Authentication subjectAuthentication = new TestingAuthenticationToken(subjectJwt, "N/A");
 
+		// The MCP authorization specification requires MCP clients to name the target MCP
+		// server in the `resource` parameter (RFC 8707), regardless of whether the
+		// authorization server acts on it.
 		var tokenExchangeClientManager = OAuth2TokenExchangeSyncHttpRequestCustomizer
-			.tokenExchangeAuthorizedClientManager(this.clientRegistrationRepository, this.authorizedClientService);
+			.tokenExchangeAuthorizedClientManager(this.clientRegistrationRepository, this.authorizedClientService,
+					this.mcpServerUrl);
 
 		var exchangedTokenValue = new AtomicReference<String>();
 		var customizer = capturing(exchangedTokenValue,
@@ -187,8 +191,17 @@ class StreamableHttpTokenExchangeTests {
 				.isEqualTo("Hello test-user");
 		}
 
-		// 4. A real exchange happened: the outgoing token is a new token, issued to the
-		// exchanging client, with the user's identity preserved
+		// 4. A real exchange happened: the outgoing token is a new token, not the subject
+		// token forwarded, with the user's identity preserved.
+		//
+		// The `aud` claim is the exchanging client, not the MCP server, because Spring
+		// Authorization Server issues `aud` as the client the token was issued to and
+		// does
+		// not reflect the `resource` parameter into it. Binding the audience to the MCP
+		// server is an authorization server concern (resource indicators, or an audience
+		// mapper on Keycloak); the MCP server here accepts the token on the shared
+		// issuer,
+		// as `validateAudienceClaim` defaults to false. See the sample README.
 		assertThat(exchangedTokenValue.get()).isNotNull().isNotEqualTo(subjectTokenValue);
 		var exchangedClaims = claims(exchangedTokenValue.get());
 		assertThat(exchangedClaims.get("sub")).isEqualTo("test-user");
