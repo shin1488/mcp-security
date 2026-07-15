@@ -83,6 +83,14 @@ the token is intended for, and MUST be sent **regardless of whether the authoriz
 server supports it**. `tokenExchangeAuthorizedClientManager(...)` therefore takes the MCP
 server's canonical URI and sets it on every exchange.
 
+That canonical URI is what the MCP server derives for itself, not its base URL: with
+`validateAudienceClaim` enabled it checks `aud` against
+`<scheme>://<host>:<port><contextPath><resourcePath>` computed from the incoming request (so a
+server mounted at `/mcp` expects `https://host/mcp`). Behind a reverse proxy, configure the
+server to reconstruct the external URL (`ForwardedHeaderFilter`); otherwise it derives its
+internal address, `aud` will not match, and the call fails with a 401 that is hard to diagnose
+from the client side.
+
 Sending it is the client's part. Acting on it is not:
 
 | Layer | Requirement | In this sample |
