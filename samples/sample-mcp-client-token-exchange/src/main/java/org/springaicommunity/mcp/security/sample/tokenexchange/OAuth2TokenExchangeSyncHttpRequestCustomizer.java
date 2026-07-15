@@ -153,7 +153,7 @@ public class OAuth2TokenExchangeSyncHttpRequestCustomizer implements McpSyncHttp
 	 * here.
 	 * <p>
 	 * <strong>resource.</strong> The <a href=
-	 * "https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization">MCP
+	 * "https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization">MCP
 	 * authorization specification</a> requires MCP clients to implement
 	 * <a href="https://www.rfc-editor.org/rfc/rfc8707">RFC 8707 resource indicators</a>:
 	 * the {@code resource} parameter MUST be included in token requests, MUST identify

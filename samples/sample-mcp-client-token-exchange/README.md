@@ -27,7 +27,7 @@ MCP server
 
 The host only holds a validated user JWT whose audience is the gateway, not the MCP
 server. That token cannot be passed through to the MCP server: the
-[MCP authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
+[MCP authorization specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
 requires audience validation and forbids token passthrough. With `client_credentials`,
 every call reaches the MCP server as the host itself: per-user authorization, audit
 attribution and user-specific policies all stop working.
@@ -76,7 +76,7 @@ credential.
 
 ## The resource parameter
 
-The [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization#resource-parameter-implementation)
+The [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization#resource-parameter-implementation)
 requires MCP clients to implement [RFC 8707 resource indicators](https://www.rfc-editor.org/rfc/rfc8707):
 the `resource` parameter MUST be included in token requests, MUST identify the MCP server
 the token is intended for, and MUST be sent **regardless of whether the authorization
