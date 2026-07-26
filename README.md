@@ -675,7 +675,7 @@ When not using the Boot auto-configuration, you need to add an `AuthenticationMc
 class McpConfiguration {
 
     @Bean
-    McpSyncClientCustomizer syncClientCustomizer() {
+    McpClientCustomizer<McpClient.SyncSpec> syncClientCustomizer() {
         return (name, syncSpec) ->
                 syncSpec.transportContextProvider(
                         new AuthenticationMcpTransportContextProvider()
@@ -719,7 +719,7 @@ When not using the Boot auto-configuration, you need to add an `AuthenticationMc
 class McpConfiguration {
 
     @Bean
-    McpSyncClientCustomizer syncClientCustomizer() {
+    McpClientCustomizer<McpClient.SyncSpec> syncClientCustomizer() {
         return (name, syncSpec) ->
                 syncSpec.transportContextProvider(
                         new AuthenticationMcpTransportContextProvider()
@@ -821,7 +821,7 @@ for example, with a Sync client (async works similarly):
 class McpConfiguration {
 
     @Bean
-    McpSyncClientCustomizer syncClientCustomizer() {
+    McpClientCustomizer<McpClient.SyncSpec> syncClientCustomizer() {
         return (name, syncSpec) -> syncSpec.transportContextProvider(() -> {
             var myThing = MyThreadLocalThing.get();
             return McpTransportContext.create(Map.of("custom-key", myThing));
@@ -846,7 +846,7 @@ For WebClient-based filter functions, the `McpTransportContext` will be availabl
 class McpConfiguration {
 
     @Bean
-    McpSyncClientCustomizer syncClientCustomizer() {
+    McpClientCustomizer<McpClient.SyncSpec> syncClientCustomizer() {
         return (name, syncSpec) -> syncSpec.transportContextProvider(() -> {
             var myThing = MyThreadLocalThing.get();
             return McpTransportContext.create(Map.of("custom-key", myThing));
