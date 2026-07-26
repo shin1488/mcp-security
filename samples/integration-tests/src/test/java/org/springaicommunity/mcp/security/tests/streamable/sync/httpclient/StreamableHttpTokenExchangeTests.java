@@ -140,8 +140,10 @@ class StreamableHttpTokenExchangeTests {
 		ensureAuthServerLogin();
 
 		// 1. Obtain a user access token through the authorization_code flow, using the
-		// "default-client" registration. This simulates the token a resource-server MCP
-		// host would receive from its gateway. Capture the raw token value.
+		// "authserver" registration (client id "default-client"). This simulates the
+		// token a
+		// resource-server MCP host would receive from its gateway. Capture the raw token
+		// value.
 		var subjectTokenValue = obtainUserAccessToken();
 		assertThat(subjectTokenValue).isNotNull();
 		assertThat(claims(subjectTokenValue).get("sub")).isEqualTo("test-user");
@@ -149,8 +151,9 @@ class StreamableHttpTokenExchangeTests {
 		// 2. Exchange that token as a *different* client ("token-exchange-client"),
 		// using the sample's token-exchange customizer. The user Authentication carries
 		// the subject token as a Jwt, mirroring a resource server's
-		// JwtAuthenticationToken; the sample's subject token resolver re-wraps it as an
-		// access token.
+		// JwtAuthenticationToken;
+		// the sample sends the token as the subject token and sets
+		// subject_token_type=access_token explicitly on the token response client.
 		var subjectJwt = Jwt.withTokenValue(subjectTokenValue)
 			.header("alg", "RS256")
 			.subject("test-user")
@@ -160,9 +163,12 @@ class StreamableHttpTokenExchangeTests {
 		Authentication subjectAuthentication = new TestingAuthenticationToken(subjectJwt, "N/A");
 
 		// The MCP authorization specification requires MCP clients to name the target MCP
-		// server in the `resource` parameter (RFC 8707). It is the canonical URI of the MCP
+		// server in the `resource` parameter (RFC 8707). It is the canonical URI of the
+		// MCP
 		// server — the streamable endpoint the client actually calls (`/mcp`), and the
-		// value the MCP server validates the token's `aud` against.
+		// value
+		// an MCP server checks the token's `aud` against once audience validation is
+		// enabled.
 		var mcpServerResource = this.mcpServerUrl + "/mcp";
 		var tokenExchangeClientManager = OAuth2TokenExchangeSyncHttpRequestCustomizer
 			.tokenExchangeAuthorizedClientManager(this.clientRegistrationRepository, this.authorizedClientService,
@@ -197,10 +203,12 @@ class StreamableHttpTokenExchangeTests {
 		// token forwarded, with the user's identity preserved.
 		//
 		// The `aud` claim is the exchanging client, not the MCP server, because Spring
-		// Authorization Server issues `aud` as the client the token was issued to and does
+		// Authorization Server issues `aud` as the client the token was issued to and
+		// does
 		// not reflect the `resource` parameter into it. Binding the audience to the MCP
 		// server is an authorization server concern (resource indicators, or an audience
-		// mapper on Keycloak); the MCP server here accepts the token on the shared issuer,
+		// mapper on Keycloak); the MCP server here accepts the token on the shared
+		// issuer,
 		// as `validateAudienceClaim` defaults to false. See the sample README.
 		assertThat(exchangedTokenValue.get()).isNotNull().isNotEqualTo(subjectTokenValue);
 		var exchangedClaims = claims(exchangedTokenValue.get());

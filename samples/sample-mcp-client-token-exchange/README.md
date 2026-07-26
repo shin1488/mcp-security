@@ -169,10 +169,10 @@ class McpClientSecurityConfiguration {
     McpSyncHttpClientRequestCustomizer requestCustomizer(
             ClientRegistrationRepository clientRegistrationRepository,
             OAuth2AuthorizedClientService authorizedClientService,
-            @Value("${mcp.server.url}") String mcpServerUri) {
+            @Value("${mcp.server.resource}") String mcpServerResource) {
         var manager = OAuth2TokenExchangeSyncHttpRequestCustomizer
             .tokenExchangeAuthorizedClientManager(clientRegistrationRepository, authorizedClientService,
-                mcpServerUri);
+                mcpServerResource);
         return new OAuth2TokenExchangeSyncHttpRequestCustomizer(manager, "token-exchange");
     }
 
@@ -251,6 +251,6 @@ call a tool on a secured MCP server, which responds with the original user's ide
 
 That test runs against Spring Authorization Server, which accepts both `...:access_token`
 and `...:jwt`, so it cannot catch a regression in the subject token type. The unit test
-`OAuth2TokenExchangeSyncHttpRequestCustomizerTests.SubjectTokenType` asserts the token
+`OAuth2TokenExchangeSyncHttpRequestCustomizerTests.TokenRequestParameters` asserts the token
 request on the wire instead: given a `Jwt` subject token, the form body must carry
 `subject_token_type=urn:ietf:params:oauth:token-type:access_token`.

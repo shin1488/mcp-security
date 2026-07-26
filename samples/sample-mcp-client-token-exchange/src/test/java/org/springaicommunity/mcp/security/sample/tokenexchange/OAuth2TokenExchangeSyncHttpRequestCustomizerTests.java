@@ -75,7 +75,7 @@ class OAuth2TokenExchangeSyncHttpRequestCustomizerTests {
 
 	private static final URI ENDPOINT = URI.create("https://mcp.example.com");
 
-	private static final String RESOURCE = "https://mcp.example.com";
+	private static final String RESOURCE = "https://mcp.example.com/mcp";
 
 	private static final Authentication AUTHENTICATION = new TestingAuthenticationToken("user", "password");
 
