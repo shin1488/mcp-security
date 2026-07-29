@@ -114,8 +114,8 @@ A `ClientRegistration` therefore corresponds to exactly one MCP server. Sharing 
 registration across several MCP servers would serve a token obtained for one server out of
 the store when calling another — the token misuse that audience binding exists to prevent.
 This is the model the library already assumes: `McpClientRegistrationRepository` resolves the
-`resource` of a token request from the registration id. That mapping is only populated by
-dynamic client registration, though — registrations declared under
+`resource` of a token request from the registration id. That mapping is populated by dynamic
+client registration and by client ID metadata documents, though — registrations declared under
 `spring.security.oauth2.client.registration`, as a resource-server host does, are stored with
 a `null` resource identifier — so this sample passes the `resource` to the manager instead.
 

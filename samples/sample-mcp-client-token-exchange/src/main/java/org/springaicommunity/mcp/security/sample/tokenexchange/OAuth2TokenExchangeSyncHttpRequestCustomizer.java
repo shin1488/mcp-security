@@ -173,10 +173,11 @@ public class OAuth2TokenExchangeSyncHttpRequestCustomizer implements McpSyncHttp
 	 * <p>
 	 * The library keeps that same mapping in {@code McpClientRegistrationRepository},
 	 * which resolves the {@code resource} of a token request from the registration id.
-	 * That mapping is only populated by dynamic client registration: registrations
-	 * declared under {@code spring.security.oauth2.client.registration}, as a
-	 * resource-server host does, are stored with a {@code null} resource identifier. The
-	 * {@code resource} is therefore passed in here.
+	 * That mapping is populated by dynamic client registration and by client ID metadata
+	 * documents: registrations declared under
+	 * {@code spring.security.oauth2.client.registration}, as a resource-server host does,
+	 * are stored with a {@code null} resource identifier. The {@code resource} is
+	 * therefore passed in here.
 	 * @param clientRegistrationRepository the client registration repository
 	 * @param authorizedClientService the authorized client service
 	 * @param resource the canonical URI of the MCP server this manager obtains tokens for
